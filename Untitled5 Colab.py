@@ -21,7 +21,6 @@ To get started:
 uploaded_file = st.file_uploader("Upload your pipeline data (CSV or Excel)", type=["csv", "xlsx"])
 
 if uploaded_file:
-    # Read file
     if uploaded_file.name.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
     else:
@@ -31,6 +30,16 @@ if uploaded_file:
     df = df.dropna(subset=['GAAP', 'Forecast'])
     df['Forecast'] = df['Forecast'].str.title()
     df['Close Quarter'] = df['Close Quarter'].astype(str)
+
+    # Custom sorting for Close Quarter like 'Q1-2024', 'Q2-2024'...
+    def quarter_sort_key(q):
+        try:
+            parts = q.split('-')
+            return int(parts[1]) * 10 + int(parts[0].replace('Q', ''))
+        except:
+            return 9999
+
+    df['Close_Quarter_Sort'] = df['Close Quarter'].apply(quarter_sort_key)
 
     st.sidebar.header("Adjust Forecast Conversion Rates")
     commit_rate = st.sidebar.slider("Commit Conversion %", 0, 100, 80) / 100
@@ -46,21 +55,23 @@ if uploaded_file:
     df['Conversion Rate'] = df['Forecast'].map(rate_map).fillna(0)
     df['Predicted Value'] = df['GAAP'] * df['Conversion Rate']
 
-    # Filters
+    # Filters with 'All' option
     st.sidebar.header("Filter Data")
-    segmentation_options = df['Coverage Segmentation'].dropna().unique()
-    cro_line_options = df['1st Line from CRO'].dropna().unique()
-    quarter_options = sorted(df['Close Quarter'].dropna().unique())
+    segmentation_options = ['All'] + sorted(df['Coverage Segmentation'].dropna().unique())
+    cro_line_options = ['All'] + sorted(df['1st Line from CRO'].dropna().unique())
+    quarter_options = ['All'] + sorted(df['Close Quarter'].dropna().unique(), key=quarter_sort_key)
 
     selected_segmentation = st.sidebar.selectbox("Coverage Segmentation", options=segmentation_options)
     selected_cro = st.sidebar.selectbox("1st Line from CRO", options=cro_line_options)
     selected_quarter = st.sidebar.selectbox("Close Quarter", options=quarter_options)
 
-    filtered_df = df[
-        (df['Coverage Segmentation'] == selected_segmentation) &
-        (df['1st Line from CRO'] == selected_cro) &
-        (df['Close Quarter'] == selected_quarter)
-    ]
+    filtered_df = df.copy()
+    if selected_segmentation != 'All':
+        filtered_df = filtered_df[filtered_df['Coverage Segmentation'] == selected_segmentation]
+    if selected_cro != 'All':
+        filtered_df = filtered_df[filtered_df['1st Line from CRO'] == selected_cro]
+    if selected_quarter != 'All':
+        filtered_df = filtered_df[filtered_df['Close Quarter'] == selected_quarter]
 
     total_pipeline = filtered_df['GAAP'].sum()
     predicted_total = filtered_df['Predicted Value'].sum()
@@ -112,7 +123,7 @@ if uploaded_file:
 
     st.subheader("📆 Predicted Value by Close Quarter")
     quarter_group = df.groupby('Close Quarter')['Predicted Value'].sum().reset_index()
-    quarter_group = quarter_group.sort_values(by='Close Quarter')
+    quarter_group = quarter_group.sort_values(by='Close Quarter', key=lambda x: x.map(quarter_sort_key))
     st.line_chart(quarter_group.set_index('Close Quarter'))
 
     st.subheader("📋 Filtered Opportunity Table")
@@ -121,7 +132,6 @@ if uploaded_file:
     st.subheader("📎 Full Dataset (Raw View)")
     st.dataframe(df)
 
-    # Export to PPTX
     def generate_ppt(data_summary):
         prs = Presentation()
         slide_layout = prs.slide_layouts[5]  # Title Only
