@@ -17,7 +17,6 @@ To get started:
 3. This app will auto-populate with predicted pipeline metrics, charts, and filters.
 """)
 
-# --- File Upload ---
 uploaded_file = st.file_uploader("Upload your pipeline data (CSV or Excel)", type=["csv", "xlsx"])
 
 if uploaded_file:
@@ -26,12 +25,10 @@ if uploaded_file:
     else:
         df = pd.read_excel(uploaded_file)
 
-    # Clean and prep
     df = df.dropna(subset=['GAAP', 'Forecast'])
     df['Forecast'] = df['Forecast'].str.title()
     df['Close Quarter'] = df['Close Quarter'].astype(str)
 
-    # Custom sorting for Close Quarter like 'Q1-2024', 'Q2-2024'...
     def quarter_sort_key(q):
         try:
             parts = q.split('-')
@@ -55,23 +52,21 @@ if uploaded_file:
     df['Conversion Rate'] = df['Forecast'].map(rate_map).fillna(0)
     df['Predicted Value'] = df['GAAP'] * df['Conversion Rate']
 
-    # Filters with 'All' option
     st.sidebar.header("Filter Data")
-    segmentation_options = ['All'] + sorted(df['Coverage Segmentation'].dropna().unique())
-    cro_line_options = ['All'] + sorted(df['1st Line from CRO'].dropna().unique())
-    quarter_options = ['All'] + sorted(df['Close Quarter'].dropna().unique(), key=quarter_sort_key)
+    allowed_segmentations = ['Enterprise', 'Commercial', 'Global']
+    segmentation_options = sorted([s for s in df['Coverage Segmentation'].dropna().unique() if s in allowed_segmentations])
+    cro_line_options = sorted(df['1st Line from CRO'].dropna().unique())
+    quarter_options = sorted(df['Close Quarter'].dropna().unique(), key=quarter_sort_key)
 
-    selected_segmentation = st.sidebar.selectbox("Coverage Segmentation", options=segmentation_options)
-    selected_cro = st.sidebar.selectbox("1st Line from CRO", options=cro_line_options)
-    selected_quarter = st.sidebar.selectbox("Close Quarter", options=quarter_options)
+    selected_segmentation = st.sidebar.multiselect("Coverage Segmentation", options=segmentation_options, default=segmentation_options)
+    selected_cro = st.sidebar.multiselect("1st Line from CRO", options=cro_line_options, default=cro_line_options)
+    selected_quarter = st.sidebar.multiselect("Close Quarter", options=quarter_options, default=quarter_options)
 
-    filtered_df = df.copy()
-    if selected_segmentation != 'All':
-        filtered_df = filtered_df[filtered_df['Coverage Segmentation'] == selected_segmentation]
-    if selected_cro != 'All':
-        filtered_df = filtered_df[filtered_df['1st Line from CRO'] == selected_cro]
-    if selected_quarter != 'All':
-        filtered_df = filtered_df[filtered_df['Close Quarter'] == selected_quarter]
+    filtered_df = df[
+        df['Coverage Segmentation'].isin(selected_segmentation) &
+        df['1st Line from CRO'].isin(selected_cro) &
+        df['Close Quarter'].isin(selected_quarter)
+    ]
 
     total_pipeline = filtered_df['GAAP'].sum()
     predicted_total = filtered_df['Predicted Value'].sum()
@@ -83,48 +78,55 @@ if uploaded_file:
     col3.metric("Predicted Closed Value", f"${predicted_total:,.0f}")
 
     st.subheader("📊 Forecast Category Breakdown")
-    forecast_group = filtered_df.groupby('Forecast').agg({
-        'GAAP': 'sum',
-        'Predicted Value': 'sum'
-    }).reset_index()
-
-    fig, ax = plt.subplots(figsize=(6, 4))
-    bar_width = 0.35
-    x = range(len(forecast_group))
-
-    bars1 = ax.bar(x, forecast_group['GAAP'], width=bar_width, label='GAAP')
-    bars2 = ax.bar([p + bar_width for p in x], forecast_group['Predicted Value'], width=bar_width, label='Predicted', alpha=0.7)
-
-    ax.set_xticks([p + bar_width / 2 for p in x])
-    ax.set_xticklabels(forecast_group['Forecast'])
-    ax.set_ylabel("Value ($)")
-    ax.set_title("GAAP vs. Predicted Value by Forecast")
+    forecast_group = filtered_df.groupby('Forecast').agg({'GAAP': 'sum', 'Predicted Value': 'sum'}).reset_index()
+    fig, ax = plt.subplots(figsize=(5, 3))
+    bars1 = ax.bar(forecast_group['Forecast'], forecast_group['GAAP'], label='GAAP')
+    bars2 = ax.bar(forecast_group['Forecast'], forecast_group['Predicted Value'], label='Predicted', alpha=0.7)
+    for bars in [bars1, bars2]:
+        for bar in bars:
+            height = bar.get_height()
+            ax.annotate(f'${height:,.0f}', xy=(bar.get_x() + bar.get_width() / 2, height),
+                        xytext=(0, 3), textcoords="offset points", ha='center', fontsize=7)
     ax.legend()
-
-    for bar in bars1:
-        height = bar.get_height()
-        ax.annotate(f'${height:,.0f}', xy=(bar.get_x() + bar.get_width() / 2, height),
-                    xytext=(0, 3), textcoords="offset points", ha='center', fontsize=8)
-
-    for bar in bars2:
-        height = bar.get_height()
-        ax.annotate(f'${height:,.0f}', xy=(bar.get_x() + bar.get_width() / 2, height),
-                    xytext=(0, 3), textcoords="offset points", ha='center', fontsize=8)
-
+    ax.set_title("GAAP vs Predicted")
     st.pyplot(fig)
 
-    st.subheader("📌 Predicted Value by Segmentation")
-    seg_group = filtered_df.groupby('Coverage Segmentation')['Predicted Value'].sum().sort_values(ascending=False)
-    st.bar_chart(seg_group)
+    col4, col5 = st.columns(2)
+    with col4:
+        st.subheader("📌 Predicted Value by Segmentation")
+        seg_group = filtered_df.groupby('Coverage Segmentation')['Predicted Value'].sum().sort_values(ascending=False)
+        fig, ax = plt.subplots(figsize=(5, 3))
+        bars = ax.bar(seg_group.index, seg_group.values)
+        for bar in bars:
+            height = bar.get_height()
+            ax.annotate(f'${height:,.0f}', xy=(bar.get_x() + bar.get_width()/2, height),
+                        xytext=(0, 3), textcoords="offset points", ha='center', fontsize=7)
+        ax.set_title("By Segmentation")
+        st.pyplot(fig)
 
-    st.subheader("📌 Predicted Value by 1st Line CRO")
-    cro_group = filtered_df.groupby('1st Line from CRO')['Predicted Value'].sum().sort_values(ascending=False)
-    st.bar_chart(cro_group)
+    with col5:
+        st.subheader("📌 Predicted Value by 1st Line CRO")
+        cro_group = filtered_df.groupby('1st Line from CRO')['Predicted Value'].sum().sort_values(ascending=False)
+        fig, ax = plt.subplots(figsize=(5, 3))
+        bars = ax.bar(cro_group.index, cro_group.values)
+        for bar in bars:
+            height = bar.get_height()
+            ax.annotate(f'${height:,.0f}', xy=(bar.get_x() + bar.get_width()/2, height),
+                        xytext=(0, 3), textcoords="offset points", ha='center', fontsize=7)
+        ax.set_title("By 1st Line CRO")
+        st.pyplot(fig)
 
     st.subheader("📆 Predicted Value by Close Quarter")
     quarter_group = df.groupby('Close Quarter')['Predicted Value'].sum().reset_index()
     quarter_group = quarter_group.sort_values(by='Close Quarter', key=lambda x: x.map(quarter_sort_key))
-    st.line_chart(quarter_group.set_index('Close Quarter'))
+    fig, ax = plt.subplots(figsize=(8, 3))
+    bars = ax.bar(quarter_group['Close Quarter'], quarter_group['Predicted Value'])
+    for bar in bars:
+        height = bar.get_height()
+        ax.annotate(f'${height:,.0f}', xy=(bar.get_x() + bar.get_width()/2, height),
+                    xytext=(0, 3), textcoords="offset points", ha='center', fontsize=7)
+    ax.set_title("Predicted Value by Quarter")
+    st.pyplot(fig)
 
     st.subheader("📋 Filtered Opportunity Table")
     st.dataframe(filtered_df[['Account Name', 'Forecast', 'GAAP', 'Conversion Rate', 'Predicted Value', 'Coverage Segmentation', '1st Line from CRO', 'Close Quarter']])
@@ -134,7 +136,7 @@ if uploaded_file:
 
     def generate_ppt(data_summary):
         prs = Presentation()
-        slide_layout = prs.slide_layouts[5]  # Title Only
+        slide_layout = prs.slide_layouts[5]
         slide = prs.slides.add_slide(slide_layout)
         title = slide.shapes.title
         title.text = "Pipeline Predict Summary"
@@ -143,7 +145,7 @@ if uploaded_file:
         Total Opportunities: {total_opps}
         Total Pipeline Value: ${total_pipeline:,.0f}
         Predicted Closed Value: ${predicted_total:,.0f}
-        Selected Filters: {selected_segmentation}, {selected_cro}, {selected_quarter}
+        Selected Filters: {', '.join(selected_segmentation)}, {', '.join(selected_cro)}, {', '.join(selected_quarter)}
         """
         textbox = slide.shapes.add_textbox(Inches(1), Inches(1.5), Inches(8), Inches(4))
         tf = textbox.text_frame
