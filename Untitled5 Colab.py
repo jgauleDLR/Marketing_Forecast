@@ -1,29 +1,33 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 from io import BytesIO
 from pptx import Presentation
 from pptx.util import Inches
 
 st.set_page_config(page_title="Pipeline Predict Dashboard", layout="wide")
-st.title("📈 Pipeline Predict - Forecasting Tool")
+st.title("Pipeline Predict - Forecasting Tool")
 
 st.markdown("""
-### 📝 Instructions
+### Instructions
 To get started:
-1. Go to Power BI and download the **raw open funnel details** as a CSV or Excel file.
-2. Upload that file below.
-3. This app will auto-populate with predicted pipeline metrics, charts, and filters.
+1. Download the raw open funnel details from Power BI and upload below.
+2. Upload your updated weekly pacing Excel sheet.
+3. This app will auto-populate predicted pipeline, targets, and pacing visuals.
 """)
 
-uploaded_file = st.file_uploader("Upload your pipeline data (CSV or Excel)", type=["csv", "xlsx"])
+# --- Uploaders ---
+pipeline_file = st.file_uploader("Upload Pipeline File (CSV or Excel)", type=["csv", "xlsx"], key="pipeline")
+pacing_file = st.file_uploader("Upload Pacing Tracker (Excel)", type=["csv", "xlsx"], key="pacing")
 
-if uploaded_file:
-    if uploaded_file.name.endswith(".csv"):
-        df = pd.read_csv(uploaded_file)
+# --- Placeholder containers ---
+total_pipeline = predicted_total = total_opps = 0
+
+if pipeline_file:
+    if pipeline_file.name.endswith(".csv"):
+        df = pd.read_csv(pipeline_file)
     else:
-        df = pd.read_excel(uploaded_file)
+        df = pd.read_excel(pipeline_file)
 
     df = df.dropna(subset=['GAAP', 'Forecast'])
     df['Forecast'] = df['Forecast'].str.title()
@@ -38,21 +42,14 @@ if uploaded_file:
 
     df['Close_Quarter_Sort'] = df['Close Quarter'].apply(quarter_sort_key)
 
-    st.sidebar.header("Adjust Forecast Conversion Rates")
     commit_rate = st.sidebar.slider("Commit Conversion %", 0, 100, 80) / 100
     upside_rate = st.sidebar.slider("Upside Conversion %", 0, 100, 50) / 100
     pipeline_rate = st.sidebar.slider("Pipeline Conversion %", 0, 100, 30) / 100
 
-    rate_map = {
-        "Commit": commit_rate,
-        "Upside": upside_rate,
-        "Pipeline": pipeline_rate
-    }
-
+    rate_map = {"Commit": commit_rate, "Upside": upside_rate, "Pipeline": pipeline_rate}
     df['Conversion Rate'] = df['Forecast'].map(rate_map).fillna(0)
     df['Predicted Value'] = df['GAAP'] * df['Conversion Rate']
 
-    st.sidebar.header("Filter Data")
     allowed_segmentations = ['Enterprise', 'Commercial', 'Global']
     segmentation_options = sorted([s for s in df['Coverage Segmentation'].dropna().unique() if s in allowed_segmentations])
     cro_line_options = sorted(df['1st Line from CRO'].dropna().unique())
@@ -62,11 +59,9 @@ if uploaded_file:
     selected_cro = st.sidebar.multiselect("1st Line from CRO", options=cro_line_options, default=cro_line_options)
     selected_quarter = st.sidebar.multiselect("Close Quarter", options=quarter_options, default=quarter_options)
 
-    filtered_df = df[
-        df['Coverage Segmentation'].isin(selected_segmentation) &
-        df['1st Line from CRO'].isin(selected_cro) &
-        df['Close Quarter'].isin(selected_quarter)
-    ]
+    filtered_df = df[df['Coverage Segmentation'].isin(selected_segmentation) &
+                     df['1st Line from CRO'].isin(selected_cro) &
+                     df['Close Quarter'].isin(selected_quarter)]
 
     total_pipeline = filtered_df['GAAP'].sum()
     predicted_total = filtered_df['Predicted Value'].sum()
@@ -77,88 +72,35 @@ if uploaded_file:
     col2.metric("Total Pipeline Value", f"${total_pipeline:,.0f}")
     col3.metric("Predicted Closed Value", f"${predicted_total:,.0f}")
 
-    st.subheader("📊 Forecast Category Breakdown")
-    forecast_group = filtered_df.groupby('Forecast').agg({'GAAP': 'sum', 'Predicted Value': 'sum'}).reset_index()
-    fig, ax = plt.subplots(figsize=(5, 3))
-    bars1 = ax.bar(forecast_group['Forecast'], forecast_group['GAAP'], label='GAAP')
-    bars2 = ax.bar(forecast_group['Forecast'], forecast_group['Predicted Value'], label='Predicted', alpha=0.7)
-    for bars in [bars1, bars2]:
-        for bar in bars:
-            height = bar.get_height()
-            ax.annotate(f'${height:,.0f}', xy=(bar.get_x() + bar.get_width() / 2, height),
-                        xytext=(0, 3), textcoords="offset points", ha='center', fontsize=7)
-    ax.legend()
-    ax.set_title("GAAP vs Predicted")
-    st.pyplot(fig)
+if pacing_file:
+    pacing = pd.read_csv(pacing_file) if pacing_file.name.endswith(".csv") else pd.read_excel(pacing_file, header=None)
 
-    col4, col5 = st.columns(2)
-    with col4:
-        st.subheader("📌 Predicted Value by Segmentation")
-        seg_group = filtered_df.groupby('Coverage Segmentation')['Predicted Value'].sum().sort_values(ascending=False)
+    try:
+        targets_row = pacing[pacing[18] == 'Target'].index[0] + 1
+        target_amount = float(pacing.iloc[targets_row, 18])
+        current_amount = float(pacing.iloc[targets_row, 19])
+        target_count = float(pacing.iloc[targets_row + 1, 18])
+        current_count = float(pacing.iloc[targets_row + 1, 19])
+
+        st.markdown("### Marketing Q2 Target vs Current Pacing")
+        st.write(f"Amount Pacing: ${current_amount:,.0f} / ${target_amount:,.0f} ({(current_amount/target_amount)*100:.1f}%)")
+        st.write(f"Count Pacing: {int(current_count)} / {int(target_count)} ({(current_count/target_count)*100:.1f}%)")
+
         fig, ax = plt.subplots(figsize=(5, 3))
-        bars = ax.bar(seg_group.index, seg_group.values)
-        for bar in bars:
-            height = bar.get_height()
-            ax.annotate(f'${height:,.0f}', xy=(bar.get_x() + bar.get_width()/2, height),
-                        xytext=(0, 3), textcoords="offset points", ha='center', fontsize=7)
-        ax.set_title("By Segmentation")
+        ax.bar(['Target Amount', 'Current Amount'], [target_amount, current_amount], color=['#ccc', '#2a9d8f'])
+        ax.set_title("Amount Pacing vs Target", fontsize=10)
+        for i, v in enumerate([target_amount, current_amount]):
+            ax.text(i, v + max([target_amount, current_amount])*0.02, f'${v:,.0f}', ha='center', fontsize=7)
         st.pyplot(fig)
 
-    with col5:
-        st.subheader("📌 Predicted Value by 1st Line CRO")
-        cro_group = filtered_df.groupby('1st Line from CRO')['Predicted Value'].sum().sort_values(ascending=False)
-        fig, ax = plt.subplots(figsize=(5, 3))
-        bars = ax.bar(cro_group.index, cro_group.values)
-        for bar in bars:
-            height = bar.get_height()
-            ax.annotate(f'${height:,.0f}', xy=(bar.get_x() + bar.get_width()/2, height),
-                        xytext=(0, 3), textcoords="offset points", ha='center', fontsize=7)
-        ax.set_title("By 1st Line CRO")
-        st.pyplot(fig)
+    except Exception as e:
+        st.warning(f"Could not extract pacing summary: {e}")
 
-    st.subheader("📆 Predicted Value by Close Quarter")
-    quarter_group = df.groupby('Close Quarter')['Predicted Value'].sum().reset_index()
-    quarter_group = quarter_group.sort_values(by='Close Quarter', key=lambda x: x.map(quarter_sort_key))
-    fig, ax = plt.subplots(figsize=(8, 3))
-    bars = ax.bar(quarter_group['Close Quarter'], quarter_group['Predicted Value'])
-    for bar in bars:
-        height = bar.get_height()
-        ax.annotate(f'${height:,.0f}', xy=(bar.get_x() + bar.get_width()/2, height),
-                    xytext=(0, 3), textcoords="offset points", ha='center', fontsize=7)
-    ax.set_title("Predicted Value by Quarter")
-    st.pyplot(fig)
-
-    st.subheader("📋 Filtered Opportunity Table")
-    st.dataframe(filtered_df[['Account Name', 'Forecast', 'GAAP', 'Conversion Rate', 'Predicted Value', 'Coverage Segmentation', '1st Line from CRO', 'Close Quarter']])
-
-    st.subheader("📎 Full Dataset (Raw View)")
-    st.dataframe(df)
-
-    def generate_ppt(data_summary):
-        prs = Presentation()
-        slide_layout = prs.slide_layouts[5]
-        slide = prs.slides.add_slide(slide_layout)
-        title = slide.shapes.title
-        title.text = "Pipeline Predict Summary"
-
-        content = f"""
-        Total Opportunities: {total_opps}
-        Total Pipeline Value: ${total_pipeline:,.0f}
-        Predicted Closed Value: ${predicted_total:,.0f}
-        Selected Filters: {', '.join(selected_segmentation)}, {', '.join(selected_cro)}, {', '.join(selected_quarter)}
-        """
-        textbox = slide.shapes.add_textbox(Inches(1), Inches(1.5), Inches(8), Inches(4))
-        tf = textbox.text_frame
-        tf.text = content
-
-        output = BytesIO()
-        prs.save(output)
-        output.seek(0)
-        return output
-
-    if st.button("📤 Export Summary to PowerPoint"):
-        pptx_file = generate_ppt(filtered_df)
-        st.download_button(label="Download PPTX", data=pptx_file, file_name="Pipeline_Predict_Summary.pptx")
-
-else:
-    st.info("👆 Upload a pipeline file to begin.")
+    try:
+        weekly_start = pacing[pacing.apply(lambda row: row.astype(str).str.contains('Enterprise').any(), axis=1)].index.min() - 1
+        weekly_end = weekly_start + 4
+        weekly_pacing = pacing.iloc[weekly_start:weekly_end]
+        st.markdown("### Weekly Creation Pacing by Segment")
+        st.dataframe(weekly_pacing.reset_index(drop=True))
+    except Exception as e:
+        st.warning(f"Could not extract weekly pacing: {e}")
