@@ -26,6 +26,7 @@ pacing_file = st.file_uploader("Upload Pacing Tracker (CSV or Excel)", type=["cs
 
 # --- Placeholder containers ---
 total_pipeline = predicted_total = total_opps = 0
+predicted_close_total = 0
 
 if pipeline_file:
     if pipeline_file.name.endswith(".csv"):
@@ -53,6 +54,7 @@ if pipeline_file:
     rate_map = {"Commit": commit_rate, "Upside": upside_rate, "Pipeline": pipeline_rate}
     df['Conversion Rate'] = df['Forecast'].map(rate_map).fillna(0)
     df['Predicted Value'] = df['GAAP'] * df['Conversion Rate']
+    predicted_close_total = df['Predicted Value'].sum()
 
     allowed_segmentations = ['Enterprise', 'Commercial', 'Global']
     segmentation_options = sorted([s for s in df['Coverage Segmentation'].dropna().unique() if s in allowed_segmentations])
@@ -76,68 +78,6 @@ if pipeline_file:
     col2.metric("Total Pipeline Value", f"${total_pipeline:,.0f}")
     col3.metric("Predicted Closed Value", f"${predicted_total:,.0f}")
 
-    st.subheader("Forecast Category Breakdown")
-    forecast_group = filtered_df.groupby('Forecast').agg({'GAAP': 'sum', 'Predicted Value': 'sum'}).reset_index()
-    fig, ax = plt.subplots(figsize=(6, 4))
-    bar_width = 0.35
-    x = range(len(forecast_group))
-    bars1 = ax.bar(x, forecast_group['GAAP'], width=bar_width, label='GAAP')
-    bars2 = ax.bar([p + bar_width for p in x], forecast_group['Predicted Value'], width=bar_width, label='Predicted', alpha=0.7)
-    ax.set_xticks([p + bar_width / 2 for p in x])
-    ax.set_xticklabels(forecast_group['Forecast'])
-    ax.set_ylabel("Value ($)")
-    ax.set_title("GAAP vs. Predicted Value by Forecast")
-    ax.legend()
-    for bar in bars1:
-        height = bar.get_height()
-        ax.annotate(f'${height:,.0f}', xy=(bar.get_x() + bar.get_width() / 2, height),
-                    xytext=(0, 3), textcoords="offset points", ha='center', fontsize=8)
-    for bar in bars2:
-        height = bar.get_height()
-        ax.annotate(f'${height:,.0f}', xy=(bar.get_x() + bar.get_width() / 2, height),
-                    xytext=(0, 3), textcoords="offset points", ha='center', fontsize=8)
-    st.pyplot(fig)
-
-    col4, col5 = st.columns(2)
-    with col4:
-        st.subheader("Predicted Value by Segmentation")
-        seg_group = filtered_df.groupby('Coverage Segmentation')['Predicted Value'].sum().sort_values(ascending=False)
-        fig, ax = plt.subplots(figsize=(5, 3))
-        bars = ax.bar(seg_group.index, seg_group.values)
-        for bar in bars:
-            height = bar.get_height()
-            ax.annotate(f'${height:,.0f}', xy=(bar.get_x() + bar.get_width()/2, height),
-                        xytext=(0, 3), textcoords="offset points", ha='center', fontsize=7)
-        ax.set_title("By Segmentation")
-        st.pyplot(fig)
-
-    with col5:
-        st.subheader("Predicted Value by 1st Line CRO")
-        cro_group = filtered_df.groupby('1st Line from CRO')['Predicted Value'].sum().sort_values(ascending=False)
-        fig, ax = plt.subplots(figsize=(5, 3))
-        bars = ax.bar(cro_group.index, cro_group.values)
-        for bar in bars:
-            height = bar.get_height()
-            ax.annotate(f'${height:,.0f}', xy=(bar.get_x() + bar.get_width()/2, height),
-                        xytext=(0, 3), textcoords="offset points", ha='center', fontsize=7)
-        ax.set_title("By 1st Line CRO")
-        st.pyplot(fig)
-
-    st.subheader("Predicted Value by Close Quarter")
-    quarter_group = df.groupby('Close Quarter')['Predicted Value'].sum().reset_index()
-    quarter_group = quarter_group.sort_values(by='Close Quarter', key=lambda x: x.map(quarter_sort_key))
-    fig, ax = plt.subplots(figsize=(8, 3))
-    bars = ax.bar(quarter_group['Close Quarter'], quarter_group['Predicted Value'])
-    for bar in bars:
-        height = bar.get_height()
-        ax.annotate(f'${height:,.0f}', xy=(bar.get_x() + bar.get_width()/2, height),
-                    xytext=(0, 3), textcoords="offset points", ha='center', fontsize=7)
-    ax.set_title("Predicted Value by Quarter")
-    st.pyplot(fig)
-
-    st.subheader("Filtered Opportunity Table")
-    st.dataframe(filtered_df[['Account Name', 'Forecast', 'GAAP', 'Conversion Rate', 'Predicted Value', 'Coverage Segmentation', '1st Line from CRO', 'Close Quarter']])
-
 if pacing_file:
     pacing = pd.read_csv(pacing_file) if pacing_file.name.endswith(".csv") else pd.read_excel(pacing_file)
 
@@ -150,11 +90,68 @@ if pacing_file:
             'Segment': segments,
             'Target': [creation_targets[seg].values[0] for seg in segments],
             'Week 1': [creation_pacing[seg].values[0] for seg in segments]
-        })
-        bar_data.set_index('Segment', inplace=True)
-        st.bar_chart(bar_data)
-        st.dataframe(bar_data.reset_index().assign(**{
-            '% to Target': lambda df_: (df_['Week 1'] / df_['Target'] * 100).round(1)
-        }))
+        }).set_index('Segment')
+
+        # Custom bar chart with green target
+        st.subheader("Q2 Creation Target vs Week 1 Pacing")
+        fig, ax = plt.subplots(figsize=(6, 4))
+        bar_width = 0.35
+        x = range(len(bar_data))
+        bars1 = ax.bar(x, bar_data['Target'], width=bar_width, label='Target', color='green')
+        bars2 = ax.bar([p + bar_width for p in x], bar_data['Week 1'], width=bar_width, label='Week 1 Pacing', color='steelblue')
+        ax.set_xticks([p + bar_width / 2 for p in x])
+        ax.set_xticklabels(bar_data.index)
+        ax.set_ylabel("Creation Amount ($M)")
+        ax.set_title("Q2 Creation Target vs Week 1 Pacing by Segment")
+        ax.legend()
+        for bar in bars1:
+            height = bar.get_height()
+            ax.annotate(f'{height:,.0f}', xy=(bar.get_x() + bar.get_width() / 2, height),
+                        xytext=(0, 3), textcoords="offset points", ha='center', fontsize=8)
+        for bar in bars2:
+            height = bar.get_height()
+            ax.annotate(f'{height:,.0f}', xy=(bar.get_x() + bar.get_width() / 2, height),
+                        xytext=(0, 3), textcoords="offset points", ha='center', fontsize=8)
+        st.pyplot(fig)
+
+        # Forecast projection chart
+        st.subheader("4. Forecast vs Target - Time Series")
+        q2_target_total = 115_000_000
+        actual_weekly_pacing = [8_000_000]
+        weeks_in_q2 = 13
+        weeks_completed = len(actual_weekly_pacing)
+        weeks_remaining = weeks_in_q2 - weeks_completed
+        weekly_projection = predicted_close_total / weeks_remaining if weeks_remaining > 0 else 0
+        projected_weekly = [weekly_projection] * weeks_remaining
+        weeks = [f"Week {i+1}" for i in range(weeks_in_q2)]
+        target_line = [q2_target_total / weeks_in_q2 * (i + 1) for i in range(weeks_in_q2)]
+        actual_line = actual_weekly_pacing + [None] * weeks_remaining
+        projection_line = actual_weekly_pacing + list(pd.Series(projected_weekly).cumsum() + actual_weekly_pacing[-1])
+
+        fig2, ax2 = plt.subplots(figsize=(10, 5))
+        ax2.plot(weeks, target_line, label="Q2 Target", linestyle='--', color='green')
+        ax2.plot(weeks, actual_line, label="Actual Pacing", marker='o', color='blue')
+        ax2.plot(weeks, projection_line, label="Projected Close (Pipeline)", marker='o', linestyle='-', color='orange')
+        ax2.set_title("Q2 Opportunity Creation Forecast vs Target")
+        ax2.set_xlabel("Week")
+        ax2.set_ylabel("Cumulative Creation Amount ($)")
+        ax2.set_xticks(range(0, weeks_in_q2))
+        ax2.set_xticklabels(weeks, rotation=45)
+        ax2.legend()
+        ax2.grid(True)
+        st.pyplot(fig2)
+
+        # Gap closure calculator
+        st.subheader("5. Opportunity Gap Closure Tool")
+        gap_amount = q2_target_total - predicted_close_total
+        st.write(f"Target: ${q2_target_total:,.0f}")
+        st.write(f"Projected from Pipeline: ${predicted_close_total:,.0f}")
+        st.write(f"Gap Remaining: ${gap_amount:,.0f}")
+
+        avg_opp_size = st.slider("Average Opportunity Size ($)", 10000, 1000000, 250000, step=10000)
+        if avg_opp_size > 0:
+            opps_needed = int(gap_amount / avg_opp_size)
+            st.metric("Opportunities Needed to Close Gap", f"{opps_needed} new opps")
+
     except Exception as e:
         st.warning(f"Could not process pacing data: {e}")
