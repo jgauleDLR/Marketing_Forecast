@@ -11,14 +11,18 @@ st.title("Pipeline Predict - Forecasting Tool")
 st.markdown("""
 ### Instructions
 To get started:
-1. Download the raw open funnel details from Power BI and upload below.
-2. Upload your updated weekly pacing Excel sheet.
+1. Upload your **Pipeline Data** file (CSV or Excel).
+2. Upload your **Weekly Pacing Tracker** (CSV or Excel).
 3. This app will auto-populate predicted pipeline, targets, and pacing visuals.
 """)
 
-# --- Uploaders ---
+# --- Upload Pipeline Section ---
+st.header("1. Upload Pipeline Data")
 pipeline_file = st.file_uploader("Upload Pipeline File (CSV or Excel)", type=["csv", "xlsx"], key="pipeline")
-pacing_file = st.file_uploader("Upload Pacing Tracker (Excel)", type=["csv", "xlsx"], key="pacing")
+
+# --- Upload Pacing Tracker Section ---
+st.header("2. Upload Pacing Targets")
+pacing_file = st.file_uploader("Upload Pacing Tracker (CSV or Excel)", type=["csv", "xlsx"], key="pacing")
 
 # --- Placeholder containers ---
 total_pipeline = predicted_total = total_opps = 0
