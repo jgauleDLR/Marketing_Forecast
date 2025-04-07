@@ -77,34 +77,25 @@ if pipeline_file:
     col3.metric("Predicted Closed Value", f"${predicted_total:,.0f}")
 
 if pacing_file:
-    pacing = pd.read_csv(pacing_file) if pacing_file.name.endswith(".csv") else pd.read_excel(pacing_file, header=None)
+    pacing = pd.read_csv(pacing_file) if pacing_file.name.endswith(".csv") else pd.read_excel(pacing_file)
 
+    st.markdown("### Q2 Targets and Pacing Overview")
     try:
-        targets_row = pacing[pacing[18] == 'Target'].index[0] + 1
-        target_amount = float(pacing.iloc[targets_row, 18])
-        current_amount = float(pacing.iloc[targets_row, 19])
-        target_count = float(pacing.iloc[targets_row + 1, 18])
-        current_count = float(pacing.iloc[targets_row + 1, 19])
+        creation_targets = pacing[(pacing['Source'] == 'Q2 Target') & (pacing['Metric Group'] == 'Creation') & (pacing['Metric Type'] == '$')]
+        creation_pacing = pacing[(pacing['Source'] == 'Week 1 Pacing') & (pacing['Metric Group'] == 'Creation') & (pacing['Metric Type'] == '$')]
 
-        st.markdown("### Marketing Q2 Target vs Current Pacing")
-        st.write(f"Amount Pacing: ${current_amount:,.0f} / ${target_amount:,.0f} ({(current_amount/target_amount)*100:.1f}%)")
-        st.write(f"Count Pacing: {int(current_count)} / {int(target_count)} ({(current_count/target_count)*100:.1f}%)")
+        segments = ['ALL', 'Enterprise', 'Commercial', 'Global']
+        bar_data = pd.DataFrame({
+            'Segment': segments,
+            'Target': [creation_targets[seg].values[0] for seg in segments],
+            'Week 1': [creation_pacing[seg].values[0] for seg in segments]
+        })
+        bar_data.set_index('Segment', inplace=True)
 
-        fig, ax = plt.subplots(figsize=(5, 3))
-        ax.bar(['Target Amount', 'Current Amount'], [target_amount, current_amount], color=['#ccc', '#2a9d8f'])
-        ax.set_title("Amount Pacing vs Target", fontsize=10)
-        for i, v in enumerate([target_amount, current_amount]):
-            ax.text(i, v + max([target_amount, current_amount])*0.02, f'${v:,.0f}', ha='center', fontsize=7)
-        st.pyplot(fig)
+        st.bar_chart(bar_data)
+        st.dataframe(bar_data.reset_index().assign(**{
+            '% to Target': lambda df_: (df_['Week 1'] / df_['Target'] * 100).round(1)
+        }))
 
     except Exception as e:
-        st.warning(f"Could not extract pacing summary: {e}")
-
-    try:
-        weekly_start = pacing[pacing.apply(lambda row: row.astype(str).str.contains('Enterprise').any(), axis=1)].index.min() - 1
-        weekly_end = weekly_start + 4
-        weekly_pacing = pacing.iloc[weekly_start:weekly_end]
-        st.markdown("### Weekly Creation Pacing by Segment")
-        st.dataframe(weekly_pacing.reset_index(drop=True))
-    except Exception as e:
-        st.warning(f"Could not extract weekly pacing: {e}")
+        st.warning(f"Could not process pacing data: {e}")
