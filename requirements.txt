@@ -2,4 +2,5 @@ streamlit
 pandas
 matplotlib
 seaborn
-openpyxl  # needed for reading Excel files
+openpyxl
+ppt # needed for reading Excel files
